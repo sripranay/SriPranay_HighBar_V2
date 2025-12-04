@@ -1,6 +1,7 @@
 import argparse
 import yaml
-from .orchestrator import run_pipeline
+from src.orchestrator import run_pipeline
+
 
 def load_config(path="config/config.yaml"):
     with open(path, "r", encoding="utf-8") as f:
