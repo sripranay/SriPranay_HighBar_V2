@@ -1,0 +1,14 @@
+.PHONY: setup run test clean
+
+setup:
+	python -m pip install --upgrade pip
+	pip install -r requirements.txt
+
+run:
+	python -m src.run "Analyze ROAS drop"
+
+test:
+	pytest -q src/tests
+
+clean:
+	rm -rf reports logs

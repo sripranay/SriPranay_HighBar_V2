@@ -1,0 +1,18 @@
+data:
+  dataset_path: "data/synthetic_fb_ads_undergarments.csv"
+  sample: false
+  sample_n: 1000
+
+analysis:
+  lookback_days: 14
+
+thresholds:
+  ctr_pct: 0.1   # default percentile to compute threshold (10th)
+  min_records_per_segment: 5
+
+schema_version: "1.0"
+logging:
+  logs_dir: "logs"
+  level: "INFO"
+outputs:
+  reports_dir: "reports"

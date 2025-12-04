@@ -1,0 +1,15 @@
+{
+  "schema_version": "1.0",
+  "required_columns": [
+    "campaign_name",
+    "adset_name",
+    "date",
+    "spend",
+    "impressions",
+    "clicks",
+    "purchases",
+    "revenue",
+    "creative_message"
+  ],
+  "date_format": null
+}
