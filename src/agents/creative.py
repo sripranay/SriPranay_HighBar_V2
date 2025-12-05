@@ -1,22 +1,23 @@
-from typing import List, Dict, Any
-import random
+# src/agents.creative.py
+from __future__ import annotations
+import logging
+from typing import Any, Dict, List
+import pandas as pd
 
-def generate_creatives_for_segment(segment_name: str, sample_msg: str=None, n=3) -> List[Dict[str,str]]:
-    out = []
-    sample_msg = (sample_msg or "").strip()
-    for i in range(1, n+1):
-        headline = f"{segment_name} – Try our new fit #{i}"
-        body = (sample_msg + " ").strip() + "Now available. Limited time offer."
-        cta = "Shop Now"
-        out.append({"campaign_name": segment_name, "headline": headline, "body": body, "cta": cta})
-    return out
+LOG = logging.getLogger(__name__)
 
-def generate_creatives(df, n_per_campaign=3):
-    out = []
-    if "campaign_name" in df.columns:
-        for name, g in df.groupby("campaign_name"):
-            sample_msg = g["creative_message"].dropna().iloc[0] if "creative_message" in g.columns and len(g["creative_message"].dropna())>0 else ""
-            out.extend(generate_creatives_for_segment(name, sample_msg=sample_msg, n=n_per_campaign))
-    else:
-        out.extend(generate_creatives_for_segment("all", sample_msg="", n=n_per_campaign))
-    return out
+
+def generate_creatives(df: pd.DataFrame, n_per_campaign: int = 2) -> List[Dict[str, Any]]:
+    if df is None or df.empty:
+        LOG.info("generate_creatives() called with empty input, returning empty list")
+        return []
+    if "campaign_name" not in df.columns:
+        LOG.info("generate_creatives(): campaign_name not in df")
+        return []
+    campaigns = pd.Series(df["campaign_name"].unique()).tolist()
+    creatives = []
+    for c in campaigns[:10]:
+        for i in range(min(n_per_campaign, 3)):
+            creatives.append({"campaign": c, "creative_id": f"{c}_rec_{i}", "text": f"Try variant {i} for {c}"})
+    LOG.info("generate_creatives() generated %d creatives", len(creatives))
+    return creatives

@@ -1,23 +1,42 @@
+# src/utils/loader.py
+from __future__ import annotations
 from pathlib import Path
 import pandas as pd
-import numpy as np
+import logging
+from typing import Any, Dict, Union
 
-def load_data(path: Path, sample=False, sample_n=500):
-    path = Path(path)
-    if not path.exists():
-        raise FileNotFoundError(f"Dataset not found: {path}")
-    df = pd.read_csv(path)
-    # basic cleaning
-    for c in ["spend","impressions","clicks","purchases","revenue"]:
-        if c in df.columns:
-            df[c] = pd.to_numeric(df[c], errors="coerce")
-    if "date" in df.columns:
-        df["date_parsed"] = pd.to_datetime(df["date"], errors="coerce")
-    # derived cols (safe)
-    if "clicks" in df.columns and "impressions" in df.columns:
-        df["ctr"] = np.where(df["impressions"]>0, df["clicks"]/df["impressions"], np.nan)
-    if "revenue" in df.columns and "spend" in df.columns:
-        df["roas"] = np.where(df["spend"]>0, df["revenue"]/df["spend"], np.nan)
-    if sample:
-        df = df.sample(min(len(df), sample_n), random_state=42)
-    return df
+LOG = logging.getLogger(__name__)
+
+
+def load_data(path_or_cfg: Union[str, Path, Dict[str, Any], None] = None):
+    cfg = {}
+    if isinstance(path_or_cfg, dict):
+        cfg = path_or_cfg
+    elif isinstance(path_or_cfg, (str, Path)):
+        cfg = {"path": str(path_or_cfg)}
+
+    path = cfg.get("path")
+    if path:
+        p = Path(path)
+        if not p.exists():
+            LOG.error("Data file not found: %s", p)
+            return pd.DataFrame()
+        try:
+            df = pd.read_csv(p)
+            return df
+        except Exception as e:
+            LOG.exception("Could not read csv %s: %s", p, e)
+            return pd.DataFrame()
+
+    for folder in ("data", "data/"):
+        p = Path(folder)
+        if p.exists():
+            files = list(p.glob("*.csv"))
+            if files:
+                try:
+                    return pd.read_csv(files[0])
+                except Exception as e:
+                    LOG.exception("Could not read csv %s: %s", files[0], e)
+                    return pd.DataFrame()
+    LOG.warning("No data file found; returning empty DataFrame")
+    return pd.DataFrame()

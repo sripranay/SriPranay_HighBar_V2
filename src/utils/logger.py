@@ -1,19 +1,33 @@
+# src/utils/logger.py
+from __future__ import annotations
 import logging
 from pathlib import Path
-import datetime
 
-def setup_logger(name="fb_agent", logs_dir="logs", level="INFO"):
-    Path(logs_dir).mkdir(parents=True, exist_ok=True)
-    ts = datetime.datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-    logfile = Path(logs_dir) / f"run_{ts}.log"
-    logger = logging.getLogger(name)
-    logger.setLevel(getattr(logging, level))
-    if not logger.handlers:
-        fh = logging.FileHandler(logfile, encoding="utf-8")
-        ch = logging.StreamHandler()
-        fmt = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
-        fh.setFormatter(fmt)
-        ch.setFormatter(fmt)
-        logger.addHandler(fh)
-        logger.addHandler(ch)
+
+def setup_logger(level: str = "INFO", logs_dir: str | Path = "logs") -> logging.Logger:
+    logs_dir = Path(logs_dir)
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    logger = logging.getLogger()
+    logger.setLevel(getattr(logging, level.upper(), logging.INFO))
+
+    # avoid duplicate handlers
+    if logger.handlers:
+        logger.handlers = []
+
+    timestamp = __import__("datetime").datetime.utcnow().strftime("run_%Y%m%dT%H%M%SZ.log")
+    fh = logging.FileHandler(logs_dir / timestamp)
+    fh.setLevel(getattr(logging, level.upper(), logging.INFO))
+
+    formatter = logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
+    fh.setFormatter(formatter)
+
+    ch = logging.StreamHandler()
+    ch.setFormatter(formatter)
+
+    logger.addHandler(fh)
+    logger.addHandler(ch)
     return logger
+
+
+def get_logger(name: str | None = None) -> logging.Logger:
+    return logging.getLogger(name)

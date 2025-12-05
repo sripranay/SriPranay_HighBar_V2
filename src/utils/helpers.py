@@ -1,18 +1,29 @@
-import numpy as np
-import math
+# src/utils.helpers.py
+from __future__ import annotations
+from pathlib import Path
+import json
+import logging
+from typing import Any, Dict, Union
 
-def safe_pct_change(new, old):
+LOG = logging.getLogger(__name__)
+
+
+def load_schema(path_or_dict: Union[str, Path, Dict[str, Any]]) -> Union[Dict[str, Any], bool]:
+    if isinstance(path_or_dict, dict):
+        return path_or_dict
+    p = Path(path_or_dict)
+    if not p.exists():
+        LOG.warning("Schema file not found: %s", p)
+        return False
+    with p.open("r", encoding="utf8") as fh:
+        return json.load(fh)
+
+
+def compute_kpis(df) -> Dict[str, Any]:
+    if df is None:
+        return {}
     try:
-        if old is None or old == 0 or math.isnan(old):
-            return None
-        return 100.0 * (new - old) / old
+        rows = getattr(df, "shape", (0, 0))[0]
+        return {"rows": rows}
     except Exception:
-        return None
-
-def compute_confidence(pct_change, n_samples=10):
-    # simple heuristic: more change + more data -> more confidence
-    if pct_change is None:
-        return 0.0
-    base = min(abs(pct_change) / 100.0, 1.0)
-    conf = base * (1 - 0.5 / (1 + n_samples/10))
-    return float(max(0.0, min(conf, 1.0)))
+        return {}

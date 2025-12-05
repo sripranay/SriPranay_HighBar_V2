@@ -1,68 +1,74 @@
-import yaml
+# src/orchestrator.py
+from __future__ import annotations
 from pathlib import Path
-from .utils.loader import load_data
-from .utils.schema_check import load_schema, check_schema
-from .utils.logger import setup_logger
-from .agents.insight import generate_hypotheses
-from .agents.evaluator import evaluate_hypotheses
-from .agents.creative import generate_creatives
-import json
+import logging
+from typing import Any, Dict
 
-ROOT = Path(__file__).resolve().parents[1]
+from src.utils.logger import setup_logger
+from src.utils.helpers import load_schema, compute_kpis
+from src.utils.loader import load_data
 
-def save_json(obj, path: Path):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(obj, f, indent=2, ensure_ascii=False)
+from src.agents.planner import planner_agent
+from src.agents.evaluator import evaluate_hypotheses, generate_hypotheses
+from src.agents.insight import insight_agent
+from src.agents.creative import generate_creatives
 
-def run_pipeline(user_query: str, cfg: dict):
-    logger = setup_logger(level=cfg.get("logging", {}).get("level","INFO"),
-                          logs_dir=cfg.get("logging", {}).get("logs_dir","logs"))
-    logger.info("Starting pipeline")
-    dp = Path(cfg["data"]["dataset_path"])
-    sample = cfg["data"].get("sample", False)
-    sample_n = cfg["data"].get("sample_n", 500)
-    df = load_data(dp, sample=sample, sample_n=sample_n)
-    logger.info(f"Loaded data: {len(df)} rows")
-    # schema
-    schema = load_schema(Path("schemas/schema_v1.json"))
-    ok, msg = check_schema(df, schema)
-    if not ok:
-        logger.warning(f"Schema check failed: {msg}")
-    else:
-        logger.info(f"Schema check OK: {msg}")
-    # insights
-    lookback = cfg.get("analysis", {}).get("lookback_days", 14)
-    hypos = generate_hypotheses(df, group_col="campaign_name", lookback_days=lookback)
-    out_dir = Path(cfg.get("outputs", {}).get("reports_dir","reports"))
-    save_json(hypos, out_dir / "insight_result_raw.json")
-    logger.info(f"Saved raw hypotheses to {out_dir/'insight_result_raw.json'}")
-    # evaluate
-    thresholds = cfg.get("thresholds", {})
-    evaluated = evaluate_hypotheses(hypos, thresholds)
-    save_json(evaluated, out_dir / "insights.json")
-    logger.info(f"Saved evaluated insights to {out_dir/'insights.json'}")
-    # creatives
-    creatives = generate_creatives(df, n_per_campaign=3)
-    save_json(creatives, out_dir / "creatives.json")
-    logger.info(f"Saved creatives to {out_dir/'creatives.json'}")
-    # human report (simple markdown)
-    md_lines = ["# Facebook Ads Agentic Analysis Report", "", f"Generated: AUTO", "", "## Quick summary", ""]
-    md_lines.append(f"Validated insights: {sum(1 for i in evaluated if i.get('validated'))} / {len(evaluated)}")
-    md_lines.append("")
-    md_lines.append("## Validated Insights (Full)")
-    for i in evaluated:
-        md_lines.append(f"### {i.get('hypothesis')}")
-        md_lines.append(f"- Evidence: {i.get('evidence')}")
-        md_lines.append(f"- Confidence: {i.get('confidence')}")
-        md_lines.append(f"- Validated: {i.get('validated')}")
-        md_lines.append("")
-    md_lines.append("## Creative Recommendations")
-    for idx, c in enumerate(creatives[:50], start=1):
-        md_lines.append(f"{idx}. {c.get('headline')} — {c.get('body')} — {c.get('cta')}")
-    (out_dir).mkdir(parents=True, exist_ok=True)
-    with open(out_dir / "report.md", "w", encoding="utf-8") as f:
-        f.write("\n".join(md_lines))
-    logger.info(f"Saved final report to {out_dir/'report.md'}")
-    summary = {"validated_count": sum(1 for i in evaluated if i.get("validated")), "creatives_for": list({c["campaign_name"] for c in creatives})}
-    return summary
+LOG = logging.getLogger(__name__)
+
+
+def _flexible_call(fn, *args, **kwargs):
+    """Call a function, allow both positional and keyword-call styles safely."""
+    return fn(*args, **kwargs)
+
+
+def run_pipeline(query: str, cfg: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    cfg = cfg or {}
+    log_cfg = cfg.get("logging", {})
+    setup_logger(level=log_cfg.get("level", "INFO"), logs_dir=log_cfg.get("logs_dir", "logs"))
+    LOG.info("run_pipeline: starting (query=%s)", query)
+
+    schema_path = cfg.get("schema", Path("schemas/schema_v1.json"))
+    try:
+        schema = load_schema(schema_path)
+        LOG.info("Loaded schema OK: %s", schema)
+    except Exception as e:
+        LOG.exception("Schema load failed: %s", e)
+        schema = False
+
+    plan = planner_agent(query=query, cfg=cfg)
+    LOG.info("Planner returned plan: %s", plan)
+
+    data_cfg = cfg.get("data", {})
+    df = load_data(data_cfg)
+    LOG.info("Loaded data: %s rows", getattr(df, "shape", (0, 0))[0])
+
+    results = {"query": query, "plan": plan, "schema": bool(schema), "rows": getattr(df, "shape", (0, 0))[0]}
+    try:
+        raw_hypos = _flexible_call(generate_hypotheses, df, group_col="campaign_name", lookback_days=cfg.get("lookback_days", 30))
+        LOG.info("Generated raw hypotheses: %s", len(raw_hypos) if raw_hypos is not None else 0)
+
+        evaluated = evaluate_hypotheses(df, raw_hypos or [])
+        LOG.info("Evaluator returned %s items", len(evaluated))
+
+        insights = insight_agent(df, evaluated)
+        LOG.info("Insight returned: keys=%s", list(insights.keys()) if isinstance(insights, dict) else str(type(insights)))
+
+        creatives = generate_creatives(df, n_per_campaign=3)
+        LOG.info("Generated creatives: %s", len(creatives))
+    except Exception as e:
+        LOG.exception("generate_hypotheses error, fallback to []: %s", e)
+        raw_hypos = []
+        evaluated = []
+        insights = {}
+        creatives = []
+
+    kpis = compute_kpis(df)
+    results.update({
+        "insights_count": len(insights) if isinstance(insights, dict) else 0,
+        "evaluated_count": len(evaluated),
+        "creatives_count": len(creatives),
+        "kpis": kpis,
+    })
+
+    LOG.info("run_pipeline: finished summary: %s", results)
+    return results
